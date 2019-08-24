@@ -3,6 +3,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using System;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,27 +27,32 @@ namespace DefibrillatorService.Services
 
         public async Task<(double Latitude, double Longitude)> GetLocationAsync(string address, CancellationToken cancellationToken)
         {
-            if (_cache.TryGetValue(address, out (double Latitude, double Longitude) result))
+            var gpsMatch = Regex.Match(address, "^(?'lat'[-+]?[\\d]{1,2}\\.\\d+),\\s*(?'lon'[-+]?[\\d]{1,3}\\.\\d+?)$");
+            if (gpsMatch.Success)
+                return (double.Parse(gpsMatch.Groups["lat"].Value), double.Parse(gpsMatch.Groups["lon"].Value));
+            else if (_cache.TryGetValue(address, out (double Latitude, double Longitude) result))
                 return result;
-
-            var encodedAddress = Convert.ToBase64String(Encoding.UTF8.GetBytes(address));
-            var location = await $"{_options.DoctorHelpRestUrl}/api/v1/geo/locationgeocoordinates?address={encodedAddress}"
-                .GetJsonAsync(cancellationToken);
-
-            var ttl = MaxTTL;
-            if (location == null)
-            {
-                result = (0, 0);
-                ttl = RetryTTL;
-            }
             else
             {
-                result = ((double)location.Latitude, (double)location.Longitude);
+                var encodedAddress = Convert.ToBase64String(Encoding.UTF8.GetBytes(address));
+                var location = await $"{_options.DoctorHelpRestUrl}/api/v1/geo/locationgeocoordinates?address={encodedAddress}"
+                    .GetJsonAsync(cancellationToken);
+
+                var ttl = MaxTTL;
+                if (location == null)
+                {
+                    result = (0, 0);
+                    ttl = RetryTTL;
+                }
+                else
+                {
+                    result = ((double)location.Latitude, (double)location.Longitude);
+                }
+
+                _cache.Set(address, result, ttl);
+
+                return result;
             }
-
-            _cache.Set(address, result, ttl);
-
-            return result;
         }
     }
 
